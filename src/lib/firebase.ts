@@ -1,4 +1,5 @@
 import { initializeApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
 import { 
   getFirestore, 
   collection, 
@@ -36,6 +37,55 @@ export const db = getFirestore(
   "ai-studio-googlecampus-01cb031e-bba4-4904-8119-df9a8400a7f7"
 );
 
+// Operation types for custom error handlers
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const currentAuth = getAuth(app);
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: currentAuth.currentUser?.uid || null,
+      email: currentAuth.currentUser?.email || null,
+      emailVerified: currentAuth.currentUser?.emailVerified || null,
+      isAnonymous: currentAuth.currentUser?.isAnonymous || null,
+      tenantId: currentAuth.currentUser?.tenantId || null,
+      providerInfo: currentAuth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
 // --- POSTS SERVICE ---
 
 export function subscribeToPosts(callback: (posts: Post[]) => void) {
@@ -47,7 +97,7 @@ export function subscribeToPosts(callback: (posts: Post[]) => void) {
     });
     callback(posts);
   }, (error) => {
-    console.error("Error subscribing to posts:", error);
+    handleFirestoreError(error, OperationType.LIST, "posts");
   });
 }
 
@@ -65,7 +115,7 @@ export async function addPost(post: Omit<Post, "id"> & { id?: string }) {
       return docRef.id;
     }
   } catch (error) {
-    console.error("Error adding post:", error);
+    handleFirestoreError(error, post.id ? OperationType.UPDATE : OperationType.CREATE, "posts");
     throw error;
   }
 }
@@ -74,7 +124,7 @@ export async function updatePost(postId: string, updates: Partial<Post>) {
   try {
     await updateDoc(doc(db, "posts", postId), updates);
   } catch (error) {
-    console.error("Error updating post:", error);
+    handleFirestoreError(error, OperationType.UPDATE, `posts/${postId}`);
     throw error;
   }
 }
@@ -87,7 +137,7 @@ export async function deletePost(postId: string) {
     const deletePromises = commentsSnapshot.docs.map(docSnap => deleteDoc(doc(db, "comments", docSnap.id)));
     await Promise.all(deletePromises);
   } catch (error) {
-    console.error("Error deleting post:", error);
+    handleFirestoreError(error, OperationType.DELETE, `posts/${postId}`);
     throw error;
   }
 }
@@ -107,7 +157,7 @@ export function subscribeToComments(callback: (commentsMap: { [postId: string]: 
     });
     callback(commentsMap);
   }, (error) => {
-    console.error("Error subscribing to comments:", error);
+    handleFirestoreError(error, OperationType.LIST, "comments");
   });
 }
 
@@ -136,7 +186,7 @@ export async function addComment(comment: Omit<Comment, "id"> & { id?: string })
 
     return commentId;
   } catch (error) {
-    console.error("Error adding comment:", error);
+    handleFirestoreError(error, comment.id ? OperationType.UPDATE : OperationType.CREATE, "comments");
     throw error;
   }
 }
@@ -145,7 +195,7 @@ export async function updateComment(commentId: string, updates: Partial<Comment>
   try {
     await updateDoc(doc(db, "comments", commentId), updates);
   } catch (error) {
-    console.error("Error updating comment:", error);
+    handleFirestoreError(error, OperationType.UPDATE, `comments/${commentId}`);
     throw error;
   }
 }
@@ -160,7 +210,7 @@ export function subscribeToTimetable(className: string, callback: (timetable: Ti
       callback(null);
     }
   }, (error) => {
-    console.error("Error subscribing to timetable:", error);
+    handleFirestoreError(error, OperationType.GET, `timetables/${className}`);
   });
 }
 
@@ -168,7 +218,7 @@ export async function saveTimetable(className: string, timetable: Timetable) {
   try {
     await setDoc(doc(db, "timetables", className), { className, timetable });
   } catch (error) {
-    console.error("Error saving timetable:", error);
+    handleFirestoreError(error, OperationType.WRITE, `timetables/${className}`);
     throw error;
   }
 }
@@ -189,7 +239,7 @@ export function subscribeToChats(channel: string, callback: (messages: ChatMessa
     });
     callback(messages);
   }, (error) => {
-    console.error("Error subscribing to chats:", error);
+    handleFirestoreError(error, OperationType.LIST, "chats");
   });
 }
 
@@ -207,7 +257,8 @@ export async function addChatMessage(message: Omit<ChatMessage, "id"> & { id?: s
       return docRef.id;
     }
   } catch (error) {
-    console.error("Error adding chat message:", error);
+    handleFirestoreError(error, message.id ? OperationType.UPDATE : OperationType.CREATE, "chats");
     throw error;
   }
 }
+

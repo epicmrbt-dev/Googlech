@@ -17,8 +17,12 @@ import {
   Save, 
   HelpCircle,
   Hash,
-  Users
+  Users,
+  Smartphone,
+  Download,
+  CheckCircle2
 } from "lucide-react";
+
 
 interface SearchSettingsViewProps {
   user: UserProfile;
@@ -26,6 +30,9 @@ interface SearchSettingsViewProps {
   onToggleDark: () => void;
   onUpdateUser: (updatedUser: UserProfile) => void;
   onAddNotification: (type: string, title: string, body: string) => void;
+  deferredPrompt?: any;
+  isAppInstalled?: boolean;
+  onInstallPWA?: () => void;
 }
 
 export default function SearchSettingsView({ 
@@ -33,7 +40,10 @@ export default function SearchSettingsView({
   isDark, 
   onToggleDark, 
   onUpdateUser, 
-  onAddNotification 
+  onAddNotification,
+  deferredPrompt,
+  isAppInstalled,
+  onInstallPWA
 }: SearchSettingsViewProps) {
   // Tabs: search vs account settings
   const [activeTab, setActiveTab] = useState<"search" | "profile" | "preferences">("profile");
@@ -411,6 +421,64 @@ export default function SearchSettingsView({
                 >
                   {pushEnabled ? "ON" : "OFF"}
                 </button>
+              </div>
+
+              {/* PWA & Favicon / Home Screen Section */}
+              <div className="py-4 border-t border-slate-150 dark:border-slate-800 space-y-4">
+                <div>
+                  <p className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                    <Smartphone className="h-4.5 w-4.5 text-blue-500" />
+                    ホーム画面に追加 & PWA / ファビコン設定
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    本アプリはPWA（Progressive Web App）に対応しており、ホーム画面に追加することでネイティブアプリ同様に高速・快適に動作します。
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-850 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+                  {/* Left: Favicon/Icon Preview */}
+                  <div className="space-y-2">
+                    <p className="font-semibold text-slate-700 dark:text-slate-300 text-[11px]">アプリアイコン・ファビコン</p>
+                    <div className="flex items-center gap-3">
+                      <div className="h-12 w-12 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1 flex items-center justify-center shadow-xs">
+                        <img src="/logo.png" alt="Icon preview" className="w-10 h-10 object-contain rounded-lg" referrerPolicy="no-referrer" />
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="text-slate-750 dark:text-slate-200 font-bold text-[11px]">Google Campus Icon</p>
+                        <p className="text-slate-400 text-[9px]">ファビコン: 16x16 / 32x32 / favicon.ico</p>
+                        <p className="text-slate-400 text-[9px]">PWA・Appleタッチアイコン: 180x180 / 192x192 / 512x512</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: Installation Action */}
+                  <div className="flex flex-col justify-center space-y-2">
+                    <p className="font-semibold text-slate-700 dark:text-slate-300 text-[11px]">インストールの状態</p>
+                    {isAppInstalled ? (
+                      <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-bold text-xs bg-emerald-50 dark:bg-emerald-950/20 px-3 py-2 rounded-xl">
+                        <CheckCircle2 className="h-4 w-4" />
+                        <span>ホーム画面にインストール済み</span>
+                      </div>
+                    ) : deferredPrompt ? (
+                      <button
+                        type="button"
+                        onClick={onInstallPWA}
+                        className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl shadow-md shadow-blue-500/10 cursor-pointer text-xs transition-all duration-150 animate-bounce"
+                      >
+                        <Download className="h-4 w-4" />
+                        ホーム画面に追加する
+                      </button>
+                    ) : (
+                      <div className="space-y-1.5 text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100/50 dark:bg-slate-900/50 p-2.5 rounded-xl">
+                        <p className="font-bold text-slate-650 dark:text-slate-300">手動で追加する方法：</p>
+                        <ul className="list-disc list-inside space-y-0.5">
+                          <li><span className="font-semibold text-slate-700 dark:text-slate-300">iOS (Safari):</span> 共有ボタン <span className="px-1.5 py-0.5 bg-white dark:bg-slate-800 border dark:border-slate-750 rounded text-[9px]">⎋</span> をタップし、「ホーム画面に追加」を選択します。</li>
+                          <li><span className="font-semibold text-slate-700 dark:text-slate-300">Android (Chrome):</span> メニュー <span className="px-1.5 py-0.5 bg-white dark:bg-slate-800 border dark:border-slate-750 rounded text-[9px]">⋮</span> から「ホーム画面に追加」または「アプリをインストール」をタップします。</li>
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* Help information section */}

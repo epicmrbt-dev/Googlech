@@ -1,8 +1,6 @@
 rules_version = '2';
-service cloud_firestore {
+service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow read/write access to all collections for any authenticated or general user
-    // Since our app runs in a sandbox, keep it open for easy testing and full cross-device communication
     match /{document=**} {
       allow read, write: if true;
     }

@@ -107,6 +107,11 @@ export default function App() {
   // Search query state
   const [searchQuery, setSearchQuery] = useState<string>("");
 
+  // PWA (Add to Home Screen) States
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isAppInstalled, setIsAppInstalled] = useState<boolean>(false);
+
+
   // Toggle Dark Mode
   const handleToggleDark = (val: boolean) => {
     setIsDark(val);
@@ -143,6 +148,51 @@ export default function App() {
   const removeBanner = (id: string) => {
     setBanners(prev => prev.filter(b => b.id !== id));
   };
+
+  // PWA/Install handlers
+  useEffect(() => {
+    // Check if running in standalone (installed) mode
+    if (window.matchMedia("(display-mode: standalone)").matches) {
+      setIsAppInstalled(true);
+    }
+
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      addNotification(
+        "system",
+        "ホーム画面に追加可能",
+        "Google Campusをホーム画面に追加すると、プッシュ機能等を含めアプリとして快適に利用できます。設定画面から追加が可能です。"
+      );
+    };
+
+    const handleAppInstalled = () => {
+      setIsAppInstalled(true);
+      setDeferredPrompt(null);
+      addNotification("system", "インストール完了！", "ホーム画面にGoogle Campusが追加されました。");
+    };
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallPWA = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then((choiceResult: { outcome: string }) => {
+        if (choiceResult.outcome === "accepted") {
+          console.log("User accepted PWA installation");
+        }
+        setDeferredPrompt(null);
+      });
+    }
+  };
+
 
   // Render correct dashboard view based on active tab
   const renderActiveView = () => {
@@ -214,6 +264,9 @@ export default function App() {
             onToggleDark={() => setIsDark(!isDark)} 
             onUpdateUser={setUser} 
             onAddNotification={addNotification} 
+            deferredPrompt={deferredPrompt}
+            isAppInstalled={isAppInstalled}
+            onInstallPWA={handleInstallPWA}
           />
         );
       case "admin":

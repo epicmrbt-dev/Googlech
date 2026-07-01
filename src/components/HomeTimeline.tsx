@@ -1240,16 +1240,7 @@ export default function HomeTimeline({
             </button>
           </div>
           <div className="space-y-2.5">
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl text-xs space-y-1">
-              <span className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 px-1.5 py-0.2 rounded-sm text-[9px] font-bold">16:00 - 18:30</span>
-              <p className="font-bold text-slate-700 dark:text-slate-200 mt-1">サッカー部通常練習</p>
-              <p className="text-[10px] text-slate-400">場所: 第1グラウンド</p>
-            </div>
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl text-xs space-y-1">
-              <span className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 px-1.5 py-0.2 rounded-sm text-[9px] font-bold">締切</span>
-              <p className="font-bold text-slate-700 dark:text-slate-200 mt-1">期末試験課題提出</p>
-              <p className="text-[10px] text-slate-400">期限: 7月6日 朝</p>
-            </div>
+            <p className="text-xs text-slate-400">今日の予定はありません</p>
           </div>
         </div>
 
