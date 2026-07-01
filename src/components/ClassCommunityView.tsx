@@ -24,7 +24,11 @@ import {
   Plus, 
   Trash2, 
   Users,
-  AlertCircle
+  AlertCircle,
+  Sparkles,
+  Upload,
+  Loader2,
+  Check
 } from "lucide-react";
 import { 
   BarChart, 
@@ -48,10 +52,92 @@ export default function ClassCommunityView({ user, isOnline, onAddNotification }
   const [activeSubTab, setActiveSubTab] = useState<"timetable" | "homework" | "prints" | "attendance" | "polls">("timetable");
 
   // Dynamic States loaded from mock data
-  const [timetable, setTimetable] = useState<Timetable>(MOCK_TIMETABLES[currentClassName] || MOCK_TIMETABLES["1組"]);
+  const [timetable, setTimetable] = useState<Timetable>(() => {
+    const saved = localStorage.getItem(`timetable_${currentClassName}`);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error("Failed to parse saved timetable", e);
+      }
+    }
+    return MOCK_TIMETABLES[currentClassName] || MOCK_TIMETABLES["1組"];
+  });
+
+  const handleUpdateTimetable = (newTimetable: Timetable) => {
+    setTimetable(newTimetable);
+    localStorage.setItem(`timetable_${currentClassName}`, JSON.stringify(newTimetable));
+  };
+
   const [homeworks, setHomeworks] = useState<Homework[]>(MOCK_HOMEWORKS.filter(h => h.className === currentClassName));
   const [prints, setPrints] = useState<PrintHandout[]>(MOCK_PRINTS.filter(p => p.className === currentClassName));
   const [polls, setPolls] = useState<Poll[]>(MOCK_POLLS.filter(p => p.className === currentClassName || !p.className));
+
+  // AI Timetable parsing state
+  const [showAiUpload, setShowAiUpload] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isParsing, setIsParsing] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [parsedPreview, setParsedPreview] = useState<Timetable | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFileSelection = (file: File) => {
+    setUploadError("");
+    setIsParsing(true);
+
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64String = reader.result as string;
+      // Extract the raw base64 part
+      const base64Data = base64String.split(",")[1];
+      const mimeType = file.type || "image/png";
+
+      try {
+        const response = await fetch("/api/timetable/parse", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            fileData: base64Data,
+            mimeType: mimeType
+          })
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || "サーバーエラーが発生しました。");
+        }
+
+        const data = await response.json();
+        if (data.timetable) {
+          setParsedPreview(data.timetable);
+        } else {
+          throw new Error("時間割データが抽出できませんでした。ファイルの画質や内容を確認してください。");
+        }
+      } catch (err: any) {
+        console.error(err);
+        setUploadError(err.message || "時間割の読み取りに失敗しました。もう一度お試しください。");
+      } finally {
+        setIsParsing(false);
+      }
+    };
+
+    reader.onerror = () => {
+      setUploadError("ファイルの読み込みに失敗しました。");
+      setIsParsing(false);
+    };
+
+    reader.readAsDataURL(file);
+  };
+
+  const handleApplyParsedTimetable = () => {
+    if (!parsedPreview) return;
+    handleUpdateTimetable(parsedPreview);
+    setShowAiUpload(false);
+    setParsedPreview(null);
+    onAddNotification("announcement", "時間割が更新されました", `AIの解析結果を反映し、${currentClassName}の時間割が更新されました！`);
+  };
   
   // Attendance Reporting State
   const [attendanceLogs, setAttendanceLogs] = useState<AttendanceReport[]>([
@@ -341,11 +427,184 @@ export default function ClassCommunityView({ user, isOnline, onAddNotification }
         
         {/* TIMETABLE VIEW */}
         {activeSubTab === "timetable" && (
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <h2 className="text-base font-extrabold text-slate-800 dark:text-slate-200">クラス時間割表</h2>
-              <span className="text-xs text-slate-400">※ 各曜日の授業順及び担当教員・教室</span>
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h2 className="text-base font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                  <span>クラス時間割表</span>
+                  <span className="px-2 py-0.5 text-[10px] font-bold bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 rounded-md">
+                    {currentClassName}
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">曜日の1限〜6限の時間割。画像やファイルを提出してAIで自動入力できます！</p>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAiUpload(!showAiUpload)}
+                  className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 dark:bg-indigo-950/30 dark:text-indigo-400 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all border border-indigo-200/50"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>画像・ファイルから自動入力 (AI)</span>
+                </button>
+              </div>
             </div>
+
+            {/* AI Uploader Dropdown Section */}
+            {showAiUpload && (
+              <div id="ai-timetable-uploader-container" className="p-5 border border-dashed border-indigo-200 dark:border-indigo-800/80 bg-indigo-50/10 dark:bg-indigo-950/5 rounded-2xl space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4.5 w-4.5 text-indigo-500 animate-pulse" />
+                    <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-200">時間割の自動登録 (Gemini AI)</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAiUpload(false);
+                      setParsedPreview(null);
+                      setUploadError("");
+                    }}
+                    className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    閉じる
+                  </button>
+                </div>
+
+                {!parsedPreview && (
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsDragging(true);
+                    }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsDragging(false);
+                      const files = e.dataTransfer.files;
+                      if (files && files.length > 0) {
+                        handleFileSelection(files[0]);
+                      }
+                    }}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
+                      isDragging
+                        ? "border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/10 scale-[0.99]"
+                        : "border-slate-200 dark:border-slate-800 hover:border-indigo-400 hover:bg-slate-50/40"
+                    }`}
+                  >
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      className="hidden"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const files = e.target.files;
+                        if (files && files.length > 0) {
+                          handleFileSelection(files[0]);
+                        }
+                      }}
+                    />
+                    {isParsing ? (
+                      <div className="space-y-3 py-4">
+                        <Loader2 className="h-8 w-8 text-indigo-500 animate-spin mx-auto" />
+                        <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400">Gemini AIが時間割ファイルを解析中...</p>
+                        <p className="text-[10px] text-slate-400 dark:text-slate-500">画像の文字を読み取って曜日や授業、先生、教室を抽出しています。しばらくお待ちください。</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 py-4">
+                        <Upload className="h-8 w-8 text-slate-400 mx-auto" />
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                          時間割の画像・ファイルをドラッグ＆ドロップ、またはクリックして選択
+                        </p>
+                        <p className="text-[10px] text-slate-400">
+                          対応フォーマット: PNG, JPEG, WEBP などの画像ファイル
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {uploadError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 rounded-xl flex items-center gap-2 text-xs border border-red-100 dark:border-red-900/40">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>{uploadError}</span>
+                  </div>
+                )}
+
+                {parsedPreview && (
+                  <div className="space-y-4">
+                    <div className="p-3.5 bg-emerald-50/30 dark:bg-emerald-950/10 border border-emerald-150 dark:border-emerald-900/40 rounded-xl space-y-1">
+                      <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                        <Check className="h-4 w-4" />
+                        <span>時間割を正常に抽出しました！</span>
+                      </p>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-550">
+                        以下の内容が検出されました。確認後、「この内容を時間割に反映する」ボタンを押すと時間割表が更新されます。
+                      </p>
+                    </div>
+
+                    {/* Preview Table of Extracted Timetable */}
+                    <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-white dark:bg-slate-900">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs min-w-[600px]">
+                          <thead>
+                            <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-800">
+                              <th className="p-2 text-center font-bold w-16 border-r border-slate-200 dark:border-slate-800">時限</th>
+                              {days.map(d => (
+                                <th key={d} className="p-2 text-center font-bold border-r border-slate-200 dark:border-slate-800">{d}曜日</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {periods.map(period => (
+                              <tr key={period} className="border-b border-slate-150 dark:border-slate-800 last:border-0">
+                                <td className="p-2 text-center font-bold bg-slate-50/30 dark:bg-slate-800/10 text-slate-500 border-r border-slate-200 dark:border-slate-800">{period}</td>
+                                {days.map(day => {
+                                  const bp = parsedPreview[day]?.find(p => p.period === period);
+                                  return (
+                                    <td key={day} className="p-2 border-r border-slate-200 dark:border-slate-800 last:border-r-0">
+                                      {bp ? (
+                                        <div className="space-y-0.5">
+                                          <p className="font-extrabold text-slate-850 dark:text-slate-100">{bp.subject}</p>
+                                          <p className="text-[9px] text-slate-400 dark:text-slate-500">👤 {bp.teacher}</p>
+                                          {bp.room && <p className="text-[9px] text-slate-400 dark:text-slate-500">📍 {bp.room}</p>}
+                                        </div>
+                                      ) : (
+                                        <p className="text-slate-300 dark:text-slate-700 text-center">-</p>
+                                      )}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setParsedPreview(null)}
+                        className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                      >
+                        別のファイルをアップロード
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleApplyParsedTimetable}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-500/10 cursor-pointer flex items-center gap-1.5 animate-bounce-subtle"
+                      >
+                        <Check className="h-4 w-4" />
+                        <span>この内容を時間割に反映する</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="overflow-x-auto">
               <table className="w-full min-w-[650px] border-collapse">
