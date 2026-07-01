@@ -1,0 +1,6 @@
+{
+  "name": "Google Campus",
+  "description": "学校専用SNS。生徒や先生が情報共有、クラス、部活動、チャットで安全に交流できるキャンパスSNSプラットフォーム。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
