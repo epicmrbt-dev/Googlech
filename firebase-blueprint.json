@@ -1,0 +1,94 @@
+{
+  "collections": {
+    "posts": {
+      "schema": {
+        "id": "string",
+        "authorUid": "string",
+        "authorName": "string",
+        "authorPhoto": "string",
+        "authorRole": "string",
+        "content": "string",
+        "attachments": "array",
+        "tags": "array",
+        "mentions": "array",
+        "className": "string",
+        "createdAt": "string",
+        "likes": "array",
+        "bookmarks": "array",
+        "commentsCount": "number"
+      },
+      "indexes": [
+        {
+          "fields": [
+            { "fieldPath": "createdAt", "order": "DESCENDING" }
+          ]
+        }
+      ]
+    },
+    "comments": {
+      "schema": {
+        "id": "string",
+        "postId": "string",
+        "authorUid": "string",
+        "authorName": "string",
+        "authorPhoto": "string",
+        "authorRole": "string",
+        "content": "string",
+        "createdAt": "string",
+        "replies": "array"
+      },
+      "indexes": [
+        {
+          "fields": [
+            { "fieldPath": "postId", "order": "ASCENDING" },
+            { "fieldPath": "createdAt", "order": "DESCENDING" }
+          ]
+        }
+      ]
+    },
+    "timetables": {
+      "schema": {
+        "className": "string",
+        "timetable": "map"
+      }
+    },
+    "chats": {
+      "schema": {
+        "id": "string",
+        "senderUid": "string",
+        "senderName": "string",
+        "senderPhoto": "string",
+        "content": "string",
+        "createdAt": "string",
+        "channel": "string"
+      },
+      "indexes": [
+        {
+          "fields": [
+            { "fieldPath": "channel", "order": "ASCENDING" },
+            { "fieldPath": "createdAt", "order": "DESCENDING" }
+          ]
+        }
+      ]
+    },
+    "gallery": {
+      "schema": {
+        "id": "string",
+        "uploaderUid": "string",
+        "uploaderName": "string",
+        "url": "string",
+        "description": "string",
+        "category": "string",
+        "createdAt": "string",
+        "likes": "array"
+      },
+      "indexes": [
+        {
+          "fields": [
+            { "fieldPath": "createdAt", "order": "DESCENDING" }
+          ]
+        }
+      ]
+    }
+  }
+}

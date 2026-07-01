@@ -18,6 +18,7 @@ import {
   CheckCheck,
   AlertCircle
 } from "lucide-react";
+import { subscribeToChats, addChatMessage } from "../lib/firebase";
 
 interface ChatViewProps {
   user: UserProfile;
@@ -28,7 +29,7 @@ interface ChatViewProps {
 export default function ChatView({ user, isOnline, onAddNotification }: ChatViewProps) {
   const [channels, setChannels] = useState<ChatChannel[]>(MOCK_CHANNELS);
   const [activeChannelId, setActiveChannelId] = useState<string>("chan_dm_sato");
-  const [chatMessages, setChatMessages] = useState<{ [channelId: string]: ChatMessage[] }>(MOCK_CHAT_MESSAGES);
+  const [chatMessages, setChatMessages] = useState<{ [channelId: string]: ChatMessage[] }>({});
   
   // Message composing state
   const [typedMessage, setTypedMessage] = useState("");
@@ -39,6 +40,76 @@ export default function ChatView({ user, isOnline, onAddNotification }: ChatView
   const [typingNpcName, setTypingNpcName] = useState("");
 
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Load channel autosave message on active channel change
+  useEffect(() => {
+    const autosaved = localStorage.getItem(`google_campus_autosave_chat_${user.uid}_${activeChannelId}`);
+    setTypedMessage(autosaved || "");
+  }, [activeChannelId, user.uid]);
+
+  // Save autosave message on keystroke
+  useEffect(() => {
+    if (typedMessage) {
+      localStorage.setItem(`google_campus_autosave_chat_${user.uid}_${activeChannelId}`, typedMessage);
+    } else {
+      localStorage.removeItem(`google_campus_autosave_chat_${user.uid}_${activeChannelId}`);
+    }
+  }, [typedMessage, activeChannelId, user.uid]);
+
+  // Real-time Firestore sync for active channel
+  useEffect(() => {
+    if (!isOnline) {
+      // Offline fallback: load mock messages
+      setChatMessages(MOCK_CHAT_MESSAGES);
+      return;
+    }
+
+    const unsubscribe = subscribeToChats(activeChannelId, async (messages) => {
+      if (messages.length === 0) {
+        // Seed initial mock messages for this channel
+        console.log(`Seeding initial mock messages for channel ${activeChannelId}...`);
+        const initialMsgs = MOCK_CHAT_MESSAGES[activeChannelId] || [];
+        try {
+          for (const msg of initialMsgs) {
+            await addChatMessage({
+              senderUid: msg.senderUid,
+              senderName: msg.senderName,
+              senderPhoto: msg.senderPhoto,
+              content: msg.content,
+              attachments: msg.attachments,
+              createdAt: msg.createdAt,
+              channel: activeChannelId,
+              readBy: msg.readBy || []
+            });
+          }
+        } catch (err) {
+          console.error("Error seeding chats:", err);
+        }
+      } else {
+        setChatMessages(prev => ({
+          ...prev,
+          [activeChannelId]: messages
+        }));
+
+        // Update the last message for this channel in channels list
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg) {
+          setChannels(prevChan => prevChan.map(c => {
+            if (c.id === activeChannelId) {
+              return {
+                ...c,
+                lastMessage: `${lastMsg.senderName}: ${lastMsg.content || "[添付ファイル]"}`,
+                lastMessageTime: lastMsg.createdAt
+              };
+            }
+            return c;
+          }));
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [activeChannelId, isOnline]);
 
   // Auto-scroll on new chats
   useEffect(() => {
@@ -51,75 +122,80 @@ export default function ChatView({ user, isOnline, onAddNotification }: ChatView
   const currentMessages = chatMessages[activeChannelId] || [];
 
   // Submit Chat Message
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!typedMessage.trim() && !selectedAttachment) return;
 
-    const newMsg: ChatMessage = {
-      id: `msg_${Date.now()}`,
+    const msgPayload = {
       senderUid: user.uid,
       senderName: user.name,
       senderPhoto: user.photoUrl,
       content: typedMessage,
       attachments: selectedAttachment ? [selectedAttachment] : undefined,
       createdAt: new Date().toISOString(),
+      channel: activeChannelId,
       readBy: [user.uid] // Read by sender by default
     };
 
-    // Update messages
-    const updatedMessages = {
-      ...chatMessages,
-      [activeChannelId]: [...currentMessages, newMsg]
-    };
-    setChatMessages(updatedMessages);
+    if (isOnline) {
+      try {
+        await addChatMessage(msgPayload);
+      } catch (err) {
+        console.error("Failed to add chat to Firestore:", err);
+      }
+    } else {
+      const newMsg: ChatMessage = {
+        id: `msg_${Date.now()}`,
+        ...msgPayload
+      };
+      // Update messages locally
+      setChatMessages(prev => ({
+        ...prev,
+        [activeChannelId]: [...(prev[activeChannelId] || []), newMsg]
+      }));
+
+      // Update last message in channels list
+      setChannels(channels.map(c => {
+        if (c.id === activeChannelId) {
+          return {
+            ...c,
+            lastMessage: `${user.name}: ${typedMessage || "[添付ファイル]"}`,
+            lastMessageTime: new Date().toISOString()
+          };
+        }
+        return c;
+      }));
+    }
+
     setTypedMessage("");
     setSelectedAttachment(null);
-
-    // Update last message in channels list
-    setChannels(channels.map(c => {
-      if (c.id === activeChannelId) {
-        return {
-          ...c,
-          lastMessage: `${user.name}: ${typedMessage || "[添付ファイル]"}`,
-          lastMessageTime: new Date().toISOString()
-        };
-      }
-      return c;
-    }));
+    localStorage.removeItem(`google_campus_autosave_chat_${user.uid}_${activeChannelId}`);
 
     // Trigger NPC simulation responses to make Chat feel real-time and responsive!
     if (activeChannelId === "chan_dm_sato" && isOnline) {
       setIsNpcTyping(true);
       setTypingNpcName("佐藤 美咲");
       
-      setTimeout(() => {
+      setTimeout(async () => {
         setIsNpcTyping(false);
-        const replyMsg: ChatMessage = {
-          id: `msg_reply_${Date.now()}`,
+        const replyPayload = {
           senderUid: "user_sato",
           senderName: "佐藤 美咲",
           senderPhoto: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
           content: "わかった！教えてくれてありがとうー！😆 あとでノート確認してみるね！期末テストがんばろう！",
           createdAt: new Date().toISOString(),
+          channel: "chan_dm_sato",
           readBy: [user.uid, "user_sato"]
         };
 
-        setChatMessages(prev => ({
-          ...prev,
-          "chan_dm_sato": [...(prev["chan_dm_sato"] || []), replyMsg]
-        }));
-
-        // Update channel last msg
-        setChannels(prevChan => prevChan.map(c => {
-          if (c.id === "chan_dm_sato") {
-            return {
-              ...c,
-              lastMessage: "佐藤 美咲: わかった！教えてくれてありがとうー！",
-              lastMessageTime: new Date().toISOString()
-            };
-          }
-          return c;
-        }));
+        if (isOnline) {
+          await addChatMessage(replyPayload).catch(console.error);
+        } else {
+          setChatMessages(prev => ({
+            ...prev,
+            "chan_dm_sato": [...(prev["chan_dm_sato"] || []), { id: `msg_reply_${Date.now()}`, ...replyPayload }]
+          }));
+        }
 
         onAddNotification("chat", "佐藤 美咲からメッセージ", "「教えてくれてありがとうー！😆」");
       }, 2500);
@@ -127,22 +203,26 @@ export default function ChatView({ user, isOnline, onAddNotification }: ChatView
       setIsNpcTyping(true);
       setTypingNpcName("高橋 健二 (先生)");
 
-      setTimeout(() => {
+      setTimeout(async () => {
         setIsNpcTyping(false);
-        const replyMsg: ChatMessage = {
-          id: `msg_reply_${Date.now()}`,
+        const replyPayload = {
           senderUid: "user_takahashi",
           senderName: "高橋 健二 (先生)",
           senderPhoto: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80",
           content: "承知しました。では明日の16:00に面談室でお待ちしています。数学の進捗状況についてのプリントも持参してくださいね。",
           createdAt: new Date().toISOString(),
+          channel: "chan_dm_takahashi",
           readBy: [user.uid, "user_takahashi"]
         };
 
-        setChatMessages(prev => ({
-          ...prev,
-          "chan_dm_takahashi": [...(prev["chan_dm_takahashi"] || []), replyMsg]
-        }));
+        if (isOnline) {
+          await addChatMessage(replyPayload).catch(console.error);
+        } else {
+          setChatMessages(prev => ({
+            ...prev,
+            "chan_dm_takahashi": [...(prev["chan_dm_takahashi"] || []), { id: `msg_reply_${Date.now()}`, ...replyPayload }]
+          }));
+        }
 
         onAddNotification("chat", "高橋 健二 (先生)からメッセージ", "「承知しました。では明日の16:00にお待ちしています。」");
       }, 2500);

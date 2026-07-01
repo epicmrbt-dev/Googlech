@@ -18,6 +18,7 @@ import CalendarView from "./components/CalendarView";
 import SearchSettingsView from "./components/SearchSettingsView";
 import AdminPanel from "./components/AdminPanel";
 import { Bell, X } from "lucide-react";
+import { subscribeToPosts, subscribeToComments, addPost, addComment } from "./lib/firebase";
 
 interface NotificationBanner {
   id: string;
@@ -31,11 +32,65 @@ export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
 
   // Global Posts and Comments State to persist changes across tabs
-  const [posts, setPosts] = useState<Post[]>(MOCK_POSTS);
-  const [comments, setComments] = useState<{ [postId: string]: Comment[] }>(MOCK_COMMENTS);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [comments, setComments] = useState<{ [postId: string]: Comment[] }>({});
 
   // Connection State: true (Online) or false (Simulated Offline)
   const [isOnline, setIsOnline] = useState<boolean>(true);
+
+  // Sync with Firestore when online
+  useEffect(() => {
+    if (!isOnline) {
+      // Offline fallback: load from local mock if Firestore not active
+      setPosts(MOCK_POSTS);
+      setComments(MOCK_COMMENTS);
+      return;
+    }
+
+    // Subscribe to real-time posts
+    const unsubscribePosts = subscribeToPosts(async (firestorePosts) => {
+      if (firestorePosts.length === 0) {
+        // Seed initial posts to Firestore
+        console.log("Seeding initial mock posts to Firestore...");
+        try {
+          for (const post of MOCK_POSTS) {
+            await addPost(post);
+          }
+        } catch (err) {
+          console.error("Error seeding initial posts:", err);
+        }
+      } else {
+        setPosts(firestorePosts);
+      }
+    });
+
+    // Subscribe to real-time comments
+    const unsubscribeComments = subscribeToComments(async (firestoreComments) => {
+      // If Firestore comments is empty, check if we need to seed
+      const keys = Object.keys(firestoreComments);
+      if (keys.length === 0) {
+        console.log("Seeding initial comments to Firestore...");
+        try {
+          // Flatten comments to seed them
+          for (const postId of Object.keys(MOCK_COMMENTS)) {
+            const commentsList = MOCK_COMMENTS[postId];
+            for (const comment of commentsList) {
+              await addComment(comment);
+            }
+          }
+        } catch (err) {
+          console.error("Error seeding initial comments:", err);
+        }
+      } else {
+        setComments(firestoreComments);
+      }
+    });
+
+    return () => {
+      unsubscribePosts();
+      unsubscribeComments();
+    };
+  }, [isOnline]);
 
   // Current active tab in the dashboard
   const [activeTab, setActiveTab] = useState<string>("home");

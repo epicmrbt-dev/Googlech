@@ -30,6 +30,7 @@ import {
   FolderOpen
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { addPost, updatePost, deletePost, addComment, updateComment } from "../lib/firebase";
 
 interface HomeTimelineProps {
   user: UserProfile;
@@ -63,7 +64,9 @@ export default function HomeTimeline({
   onAddNotification
 }: HomeTimelineProps) {
   // Post Creator State
-  const [newContent, setNewContent] = useState("");
+  const [newContent, setNewContent] = useState(() => {
+    return localStorage.getItem(`google_campus_autosave_post_${user.uid}`) || "";
+  });
   const [selectedClass, setSelectedClass] = useState<string>("all"); // 'all', 'class-only', 'school-wide'
   const [selectedAttachments, setSelectedAttachments] = useState<Attachment[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -81,7 +84,17 @@ export default function HomeTimeline({
   const [editContent, setEditContent] = useState("");
 
   // Comment State per post
-  const [commentInputs, setCommentInputs] = useState<{ [postId: string]: string }>({});
+  const [commentInputs, setCommentInputs] = useState<{ [postId: string]: string }>(() => {
+    const saved = localStorage.getItem(`google_campus_autosave_comments_${user.uid}`);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return {};
+  });
   const [replyInputs, setReplyInputs] = useState<{ [commentId: string]: string }>({});
   const [activeReplyBoxId, setActiveReplyBoxId] = useState<string | null>(null);
   const [showCommentsForPost, setShowCommentsForPost] = useState<{ [postId: string]: boolean }>({});
@@ -94,6 +107,16 @@ export default function HomeTimeline({
 
   // Emoji preset list
   const emojiPresets = ["👍", "🙌", "😊", "🎉", "📝", "⚽", "🎺", "💻", "🔥", "🏫"];
+
+  // Device-based autosave for new post content
+  useEffect(() => {
+    localStorage.setItem(`google_campus_autosave_post_${user.uid}`, newContent);
+  }, [newContent, user.uid]);
+
+  // Device-based autosave for comments
+  useEffect(() => {
+    localStorage.setItem(`google_campus_autosave_comments_${user.uid}`, JSON.stringify(commentInputs));
+  }, [commentInputs, user.uid]);
 
   // Load and save drafts to localStorage
   useEffect(() => {
@@ -207,9 +230,8 @@ export default function HomeTimeline({
       return;
     }
 
-    // Create Real Post
-    const newPost: Post = {
-      id: `post_${Date.now()}`,
+    // Create Real Post in Firestore or Local Fallback
+    const postPayload = {
       authorUid: user.uid,
       authorName: user.name,
       authorPhoto: user.photoUrl,
@@ -225,8 +247,15 @@ export default function HomeTimeline({
       commentsCount: 0
     };
 
-    setPosts([newPost, ...posts]);
-    setComments(prev => ({ ...prev, [newPost.id]: [] }));
+    addPost(postPayload).then(() => {
+      onAddNotification("post", "新規投稿が共有されました", "あなたの投稿がキャンパスタイムラインに追加されました。");
+    }).catch(err => {
+      console.error("Failed to add post to Firestore:", err);
+      // fallback
+      const newPost: Post = { id: `post_${Date.now()}`, ...postPayload };
+      setPosts([newPost, ...posts]);
+      setComments(prev => ({ ...prev, [newPost.id]: [] }));
+    });
 
     // Reset Inputs
     setNewContent("");
@@ -234,17 +263,15 @@ export default function HomeTimeline({
     setSelectedTags([]);
     setSelectedMention("");
     setSelectedClass("all");
-
-    onAddNotification("post", "新規投稿が共有されました", "あなたの投稿がキャンパスタイムラインに追加されました。");
+    localStorage.removeItem(`google_campus_autosave_post_${user.uid}`);
   };
 
-  const syncDraft = (draftId: string) => {
+  const syncDraft = async (draftId: string) => {
     if (!isOnline) return;
     const draft = drafts.find(d => d.id === draftId);
     if (!draft) return;
 
-    const newPost: Post = {
-      id: `post_${Date.now()}_${draft.id}`,
+    const postPayload = {
       authorUid: user.uid,
       authorName: user.name,
       authorPhoto: user.photoUrl,
@@ -260,85 +287,101 @@ export default function HomeTimeline({
       commentsCount: 0
     };
 
-    setPosts([newPost, ...posts]);
-    setComments(prev => ({ ...prev, [newPost.id]: [] }));
-    
-    // Remove from drafts
-    const remaining = drafts.filter(d => d.id !== draftId);
-    saveDraftsToStorage(remaining);
-
-    onAddNotification("post", "下書きの同期が完了しました", "オフライン時の下書きが正常に投稿されました。");
+    try {
+      await addPost(postPayload);
+      // Remove from drafts
+      const remaining = drafts.filter(d => d.id !== draftId);
+      saveDraftsToStorage(remaining);
+      onAddNotification("post", "下書きの同期が完了しました", "オフライン時の下書きが正常に投稿されました。");
+    } catch (err) {
+      console.error(err);
+    }
   };
 
-  const syncAllDrafts = () => {
+  const syncAllDrafts = async () => {
     if (!isOnline || drafts.length === 0) return;
     
-    const newPosts: Post[] = drafts.map((draft, idx) => ({
-      id: `post_sync_${idx}_${Date.now()}`,
-      authorUid: user.uid,
-      authorName: user.name,
-      authorPhoto: user.photoUrl,
-      authorRole: user.role,
-      content: draft.content,
-      attachments: draft.attachments,
-      tags: draft.tags,
-      mentions: draft.mentions,
-      className: draft.className,
-      createdAt: draft.createdAt,
-      likes: [],
-      bookmarks: [],
-      commentsCount: 0
-    }));
-
-    setPosts([...newPosts, ...posts]);
-    
-    const newCommentsState = { ...comments };
-    newPosts.forEach(np => {
-      newCommentsState[np.id] = [];
-    });
-    setComments(newCommentsState);
-
-    saveDraftsToStorage([]);
-    onAddNotification("post", "すべての下書きを同期しました", `${newPosts.length}件の投稿がタイムラインに反映されました。`);
+    try {
+      for (const draft of drafts) {
+        await addPost({
+          authorUid: user.uid,
+          authorName: user.name,
+          authorPhoto: user.photoUrl,
+          authorRole: user.role,
+          content: draft.content,
+          attachments: draft.attachments,
+          tags: draft.tags,
+          mentions: draft.mentions,
+          className: draft.className,
+          createdAt: draft.createdAt,
+          likes: [],
+          bookmarks: [],
+          commentsCount: 0
+        });
+      }
+      saveDraftsToStorage([]);
+      onAddNotification("post", "すべての下書きを同期しました", `${drafts.length}件の投稿がタイムラインに反映されました。`);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   // Like Toggle
-  const handleLike = (postId: string) => {
-    setPosts(posts.map(p => {
-      if (p.id === postId) {
-        const isLiked = p.likes.includes(user.uid);
-        const newLikes = isLiked 
-          ? p.likes.filter(uid => uid !== user.uid)
-          : [...p.likes, user.uid];
-        
-        // Trigger notification if liked by someone else
-        if (!isLiked && p.authorUid !== user.uid) {
+  const handleLike = async (postId: string) => {
+    const post = posts.find(p => p.id === postId);
+    if (!post) return;
+
+    const isLiked = post.likes.includes(user.uid);
+    const newLikes = isLiked 
+      ? post.likes.filter(uid => uid !== user.uid)
+      : [...post.likes, user.uid];
+
+    if (isOnline) {
+      try {
+        await updatePost(postId, { likes: newLikes });
+        if (!isLiked && post.authorUid !== user.uid) {
           onAddNotification("like", "投稿にいいね！されました", `${user.name}さんがあなたの投稿にいいね！しました。`);
         }
-
-        return { ...p, likes: newLikes };
+      } catch (err) {
+        console.error(err);
       }
-      return p;
-    }));
+    } else {
+      setPosts(posts.map(p => p.id === postId ? { ...p, likes: newLikes } : p));
+    }
   };
 
   // Bookmark Toggle
-  const handleBookmark = (postId: string) => {
-    setPosts(posts.map(p => {
-      if (p.id === postId) {
-        const isBookmarked = p.bookmarks.includes(user.uid);
-        const newBookmarks = isBookmarked
-          ? p.bookmarks.filter(uid => uid !== user.uid)
-          : [...p.bookmarks, user.uid];
-        return { ...p, bookmarks: newBookmarks };
+  const handleBookmark = async (postId: string) => {
+    const post = posts.find(p => p.id === postId);
+    if (!post) return;
+
+    const isBookmarked = post.bookmarks.includes(user.uid);
+    const newBookmarks = isBookmarked
+      ? post.bookmarks.filter(uid => uid !== user.uid)
+      : [...post.bookmarks, user.uid];
+
+    if (isOnline) {
+      try {
+        await updatePost(postId, { bookmarks: newBookmarks });
+      } catch (err) {
+        console.error(err);
       }
-      return p;
-    }));
+    } else {
+      setPosts(posts.map(p => p.id === postId ? { ...p, bookmarks: newBookmarks } : p));
+    }
   };
 
   // Delete Post
-  const handleDeletePost = (postId: string) => {
-    setPosts(posts.filter(p => p.id !== postId));
+  const handleDeletePost = async (postId: string) => {
+    if (isOnline) {
+      try {
+        await deletePost(postId);
+      } catch (err) {
+        console.error(err);
+      }
+    } else {
+      setPosts(posts.filter(p => p.id !== postId));
+    }
     setOpenMenuPostId(null);
   };
 
@@ -349,23 +392,30 @@ export default function HomeTimeline({
     setOpenMenuPostId(null);
   };
 
-  const handleSaveEdit = (postId: string) => {
-    setPosts(posts.map(p => {
-      if (p.id === postId) {
-        return { ...p, content: editContent, updatedAt: new Date().toISOString() };
+  const handleSaveEdit = async (postId: string) => {
+    if (isOnline) {
+      try {
+        await updatePost(postId, { content: editContent, updatedAt: new Date().toISOString() });
+      } catch (err) {
+        console.error(err);
       }
-      return p;
-    }));
+    } else {
+      setPosts(posts.map(p => {
+        if (p.id === postId) {
+          return { ...p, content: editContent, updatedAt: new Date().toISOString() };
+        }
+        return p;
+      }));
+    }
     setEditingPostId(null);
   };
 
   // Add Comment
-  const handleAddComment = (postId: string) => {
+  const handleAddComment = async (postId: string) => {
     const input = commentInputs[postId];
     if (!input || !input.trim()) return;
 
-    const newComment: Comment = {
-      id: `comm_${Date.now()}`,
+    const commentPayload = {
       postId,
       authorUid: user.uid,
       authorName: user.name,
@@ -377,29 +427,47 @@ export default function HomeTimeline({
       replies: []
     };
 
-    const postComments = comments[postId] || [];
-    setComments({
-      ...comments,
-      [postId]: [...postComments, newComment]
-    });
-
-    // Update comment counts
-    setPosts(posts.map(p => {
-      if (p.id === postId) {
-        if (p.authorUid !== user.uid) {
+    if (isOnline) {
+      try {
+        await addComment(commentPayload);
+        const post = posts.find(p => p.id === postId);
+        if (post && post.authorUid !== user.uid) {
           onAddNotification("comment", "新しいコメントが届きました", `${user.name}さんがあなたの投稿にコメントしました。`);
         }
-        return { ...p, commentsCount: p.commentsCount + 1 };
+      } catch (err) {
+        console.error(err);
       }
-      return p;
-    }));
+    } else {
+      const newComment: Comment = {
+        id: `comm_${Date.now()}`,
+        ...commentPayload
+      };
+      const postComments = comments[postId] || [];
+      setComments({
+        ...comments,
+        [postId]: [...postComments, newComment]
+      });
 
-    // Clear comment input
-    setCommentInputs({ ...commentInputs, [postId]: "" });
+      // Update comment counts
+      setPosts(posts.map(p => {
+        if (p.id === postId) {
+          if (p.authorUid !== user.uid) {
+            onAddNotification("comment", "新しいコメントが届きました", `${user.name}さんがあなたの投稿にコメントしました。`);
+          }
+          return { ...p, commentsCount: p.commentsCount + 1 };
+        }
+        return p;
+      }));
+    }
+
+    // Clear comment input and its autosave
+    const updatedInputs = { ...commentInputs, [postId]: "" };
+    setCommentInputs(updatedInputs);
+    localStorage.setItem(`google_campus_autosave_comments_${user.uid}`, JSON.stringify(updatedInputs));
   };
 
   // Add Reply
-  const handleAddReply = (postId: string, commentId: string) => {
+  const handleAddReply = async (postId: string, commentId: string) => {
     const input = replyInputs[commentId];
     if (!input || !input.trim()) return;
 
@@ -425,10 +493,22 @@ export default function HomeTimeline({
       return c;
     });
 
-    setComments({
-      ...comments,
-      [postId]: updatedComments
-    });
+    if (isOnline) {
+      try {
+        const commentToUpdate = postComments.find(c => c.id === commentId);
+        if (commentToUpdate) {
+          const replies = [...(commentToUpdate.replies || []), newReply];
+          await updateComment(commentId, { replies });
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    } else {
+      setComments({
+        ...comments,
+        [postId]: updatedComments
+      });
+    }
 
     // Clear reply input
     setReplyInputs({ ...replyInputs, [commentId]: "" });
@@ -436,13 +516,21 @@ export default function HomeTimeline({
   };
 
   // Flag / Report Post (Admin/Audit feature!)
-  const handleReportPost = (postId: string, reason: string) => {
-    setPosts(posts.map(p => {
-      if (p.id === postId) {
-        return { ...p, isReported: true, reportReason: reason };
+  const handleReportPost = async (postId: string, reason: string) => {
+    if (isOnline) {
+      try {
+        await updatePost(postId, { isReported: true, reportReason: reason });
+      } catch (err) {
+        console.error(err);
       }
-      return p;
-    }));
+    } else {
+      setPosts(posts.map(p => {
+        if (p.id === postId) {
+          return { ...p, isReported: true, reportReason: reason };
+        }
+        return p;
+      }));
+    }
     setOpenMenuPostId(null);
     onAddNotification("club", "投稿を通報しました", "不適切な可能性がある投稿としてモデレータに通報されました。審査が行われます。");
   };

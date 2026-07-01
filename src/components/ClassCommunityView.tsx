@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { UserProfile, UserRole, Timetable, Homework, PrintHandout, Poll, AttendanceReport } from "../types";
 import { 
   MOCK_TIMETABLES, 
@@ -30,6 +30,7 @@ import {
   Loader2,
   Check
 } from "lucide-react";
+import { subscribeToTimetable, saveTimetable } from "../lib/firebase";
 import { 
   BarChart, 
   Bar, 
@@ -64,9 +65,32 @@ export default function ClassCommunityView({ user, isOnline, onAddNotification }
     return MOCK_TIMETABLES[currentClassName] || MOCK_TIMETABLES["1組"];
   });
 
+  // Real-time timetable synchronization with Firestore
+  useEffect(() => {
+    if (!isOnline) return;
+
+    const unsubscribe = subscribeToTimetable(currentClassName, (dbTimetable) => {
+      if (dbTimetable) {
+        setTimetable(dbTimetable);
+        localStorage.setItem(`timetable_${currentClassName}`, JSON.stringify(dbTimetable));
+      } else {
+        // Seed database with current local/mock timetable
+        console.log(`Seeding timetable for ${currentClassName} to Firestore...`);
+        saveTimetable(currentClassName, timetable).catch(console.error);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [currentClassName, isOnline]);
+
   const handleUpdateTimetable = (newTimetable: Timetable) => {
     setTimetable(newTimetable);
     localStorage.setItem(`timetable_${currentClassName}`, JSON.stringify(newTimetable));
+    if (isOnline) {
+      saveTimetable(currentClassName, newTimetable).catch(err => {
+        console.error("Failed to save timetable to Firestore:", err);
+      });
+    }
   };
 
   const [homeworks, setHomeworks] = useState<Homework[]>(MOCK_HOMEWORKS.filter(h => h.className === currentClassName));
