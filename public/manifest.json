@@ -1,7 +1,13 @@
 {
   "short_name": "Google Campus",
   "name": "Google Campus",
+  "description": "Google Campus School Portal Web App",
   "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "64x64",
+      "type": "image/png"
+    },
     {
       "src": "/logo.png",
       "sizes": "192x192",
@@ -12,10 +18,11 @@
       "src": "/logo.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ],
-  "start_url": "/",
+  "start_url": ".",
+  "scope": "/",
   "background_color": "#ffffff",
   "theme_color": "#2563eb",
   "display": "standalone",
