@@ -12,12 +12,10 @@ createRoot(document.getElementById('root')!).render(
 // Register service worker for PWA installation and support
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then((registration) => {
-        console.log('ServiceWorker registration successful with scope: ', registration.scope);
-      })
-      .catch((err) => {
-        console.error('ServiceWorker registration failed: ', err);
-      });
+    navigator.serviceWorker.register('/sw.js').then((registration) => {
+      console.log('Service Worker registered: ', registration);
+    }).catch((error) => {
+      console.log('Service Worker registration failed: ', error);
+    });
   });
 }
